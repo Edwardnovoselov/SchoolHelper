@@ -1,0 +1,66 @@
+# Автоматическая сборка приложения на облачном Mac от GitHub.
+# Запускается при каждой загрузке кода (или вручную: Actions → Сборка приложения → Run workflow).
+# Готовый файл SchoolHelper.ipa появляется в разделе Releases репозитория.
+name: Сборка приложения
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Скачать код
+        uses: actions/checkout@v4
+
+      - name: Установить XcodeGen
+        run: brew install xcodegen
+
+      - name: Создать проект Xcode
+        run: xcodegen generate
+
+      - name: Собрать приложение
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project SchoolHelper.xcodeproj \
+            -scheme SchoolHelper \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build.log
+
+      - name: Показать ошибки сборки
+        if: failure()
+        run: |
+          # Ошибки компилятора выводим отдельным списком — их видно прямо на странице сборки
+          grep -E "error:" build.log | sort -u | head -30 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
+
+      - name: Упаковать в .ipa
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/SchoolHelper.app Payload/
+          zip -qry SchoolHelper.ipa Payload
+
+      - name: Сохранить файл сборки
+        uses: actions/upload-artifact@v4
+        with:
+          name: SchoolHelper-ipa
+          path: SchoolHelper.ipa
+
+      - name: Опубликовать в Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-${{ github.run_number }}" SchoolHelper.ipa \
+            --title "Сборка ${{ github.run_number }}" \
+            --notes "Скачайте SchoolHelper.ipa и установите через Sideloadly (см. README)."
