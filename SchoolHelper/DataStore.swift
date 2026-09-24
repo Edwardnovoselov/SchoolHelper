@@ -20,6 +20,9 @@ final class DataStore: ObservableObject {
         }
     }
 
+    /// Открытая вкладка внизу экрана (0 — «Сегодня»). В файл не сохраняется.
+    @Published var selectedTab = 0
+
     private var rescheduleTask: Task<Void, Never>? = nil
 
     private init() {
@@ -111,6 +114,11 @@ final class DataStore: ObservableObject {
     func refresh() async {
         removeOldHomework()
         await NotificationManager.reschedule(with: data)
+    }
+
+    /// Нажали на уведомление — показываем вкладку «Сегодня», там всё полностью.
+    func openTodayTab() {
+        selectedTab = 0
     }
 
     /// Наступил новый день (полночь), а приложение открыто — чистим ДЗ и обновляем экран.

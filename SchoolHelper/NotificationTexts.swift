@@ -7,6 +7,10 @@ struct NotificationText {
 }
 
 /// Собирает тексты уведомлений из расписания и ДЗ.
+///
+/// iOS показывает в свёрнутом уведомлении только 4–5 строк, поэтому текст компактный:
+/// все уроки — одной строкой, кружки — одной строкой, ДЗ — по строке на предмет.
+/// Полный текст виден, если нажать на уведомление и подержать (или потянуть его вниз).
 enum NotificationTexts {
 
     /// Утро: уроки на сегодня + занятия после школы.
@@ -22,14 +26,9 @@ enum NotificationTexts {
         }
 
         var lines: [String] = []
-        if lessons.isEmpty {
-            lines.append("Уроков нет 🎉")
-        } else {
-            lines += lessons.map { "\($0.number). \($0.subject)" }
-        }
+        lines.append(lessons.isEmpty ? "Уроков нет 🎉" : "Уроки: " + lessonsLine(lessons))
         if !activities.isEmpty {
-            lines.append("После школы:")
-            lines += activities.map { "\($0.time.text) — \($0.title)" }
+            lines.append("После школы: " + activitiesLine(activities))
         }
 
         return NotificationText(
@@ -51,17 +50,21 @@ enum NotificationTexts {
         }
 
         var lines: [String] = []
-        if lessons.isEmpty && homework.isEmpty {
-            lines.append("Уроков нет 🎉")
-        } else {
-            lines += lessonLines(lessons: lessons, homework: homework)
-            if homework.isEmpty {
-                lines.append("ДЗ на завтра не записано")
-            }
-        }
+        lines.append(lessons.isEmpty ? "Уроков нет 🎉" : "Уроки: " + lessonsLine(lessons))
         if !activities.isEmpty {
-            lines.append("После школы:")
-            lines += activities.map { "\($0.time.text) — \($0.title)" }
+            lines.append("После школы: " + activitiesLine(activities))
+        }
+
+        if homework.isEmpty {
+            if !lessons.isEmpty {
+                lines.append("ДЗ не записано")
+            }
+        } else {
+            // По строке на каждое задание: "• Математика: стр. 45, № 3"
+            for hw in homework {
+                let subject = lessons.first(where: { $0.number == hw.lessonNumber })?.subject ?? hw.subject
+                lines.append("• \(subject): \(hw.text)")
+            }
         }
 
         return NotificationText(
@@ -70,22 +73,13 @@ enum NotificationTexts {
         )
     }
 
-    /// Строки вида "1. Математика — ДЗ: стр. 45, № 3". Если ДЗ нет — только урок.
-    static func lessonLines(lessons: [Lesson], homework: [Homework]) -> [String] {
-        var lines: [String] = []
-        for lesson in lessons {
-            let tasks = homework.filter { $0.lessonNumber == lesson.number }.map(\.text)
-            if tasks.isEmpty {
-                lines.append("\(lesson.number). \(lesson.subject)")
-            } else {
-                lines.append("\(lesson.number). \(lesson.subject) — ДЗ: \(tasks.joined(separator: "; "))")
-            }
-        }
-        // ДЗ на урок, которого уже нет в расписании (например, расписание поменяли)
-        let numbers = Set(lessons.map(\.number))
-        for hw in homework where !numbers.contains(hw.lessonNumber) {
-            lines.append("\(hw.lessonNumber). \(hw.subject) — ДЗ: \(hw.text)")
-        }
-        return lines
+    /// "1. Математика, 2. Русский, 3. Физкультура"
+    private static func lessonsLine(_ lessons: [Lesson]) -> String {
+        lessons.map { "\($0.number). \($0.subject)" }.joined(separator: ", ")
+    }
+
+    /// "15:00 Футбол, 18:00 Музыка"
+    private static func activitiesLine(_ activities: [ExtraActivity]) -> String {
+        activities.map { "\($0.time.text) \($0.title)" }.joined(separator: ", ")
     }
 }

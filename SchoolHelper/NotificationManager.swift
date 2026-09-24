@@ -141,4 +141,10 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
                                             willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         [.banner, .list, .sound]
     }
+
+    /// Нажали на уведомление — открываем вкладку «Сегодня».
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                            didReceive response: UNNotificationResponse) async {
+        await DataStore.shared.openTodayTab()
+    }
 }
