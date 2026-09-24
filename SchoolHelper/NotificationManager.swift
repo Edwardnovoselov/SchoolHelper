@@ -8,7 +8,7 @@ import UserNotifications
 /// все уведомления собираются заново с актуальным текстом.
 @MainActor
 enum NotificationManager {
-    /// На сколько дней вперёд планируем. iOS хранит максимум 64 уведомления, у нас 2 × 14 + 1 = 29.
+    /// На сколько дней вперёд планируем. iOS хранит максимум 64 уведомления, у нас не больше 3 × 14 + 1 = 43.
     static let daysAhead = 14
 
     private static var center: UNUserNotificationCenter { .current() }
@@ -57,6 +57,15 @@ enum NotificationManager {
                                          time: data.settings.eveningTime, now: now) {
                 requests.append(request)
             }
+
+            // ДЗ — отдельным уведомлением на 5 секунд позже и без звука (чтобы не звенело дважды)
+            if data.settings.eveningEnabled,
+               let text = NotificationTexts.eveningHomework(for: day, data: data),
+               let request = makeRequest(id: "homework-\(key)", text: text, day: day,
+                                         time: data.settings.eveningTime, second: 5,
+                                         withSound: false, now: now) {
+                requests.append(request)
+            }
         }
 
         // Напоминание продлить приложение: накануне дня окончания, в 19:00
@@ -88,46 +97,64 @@ enum NotificationManager {
         }
     }
 
-    /// Тестовое уведомление через 5 секунд — с тем же текстом, что придёт утром или вечером.
+    /// Тестовые уведомления через 5 секунд — с тем же текстом, что придёт утром или вечером.
     static func sendTest(evening: Bool, data: AppData) async {
         let now = Date()
-        let text = evening
-            ? NotificationTexts.evening(for: now, data: data, force: true)
-            : NotificationTexts.morning(for: now, data: data, force: true)
-        guard let text else { return }
+        let tests: [(id: String, text: NotificationText?, delay: TimeInterval, withSound: Bool)]
+        if evening {
+            tests = [
+                ("test-evening", NotificationTexts.evening(for: now, data: data, force: true), 5, true),
+                ("test-homework", NotificationTexts.eveningHomework(for: now, data: data), 10, false),
+            ]
+        } else {
+            tests = [("test-morning", NotificationTexts.morning(for: now, data: data, force: true), 5, true)]
+        }
 
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 5, repeats: false)
-        let request = UNNotificationRequest(identifier: evening ? "test-evening" : "test-morning",
-                                            content: makeContent(text), trigger: trigger)
-        do {
-            try await center.add(request)
-        } catch {
-            print("Не удалось отправить тестовое уведомление: \(error)")
+        for test in tests {
+            guard let text = test.text else { continue }
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: test.delay, repeats: false)
+            let content = makeContent(text, thread: test.id, withSound: test.withSound)
+            let request = UNNotificationRequest(identifier: test.id, content: content, trigger: trigger)
+            do {
+                try await center.add(request)
+            } catch {
+                print("Не удалось отправить тестовое уведомление: \(error)")
+            }
         }
     }
 
     // MARK: - Вспомогательное
 
     /// Уведомление на конкретный день и время. nil — если это время уже прошло.
-    private static func makeRequest(id: String, text: NotificationText, day: Date,
-                                    time: TimeOfDay, now: Date) -> UNNotificationRequest? {
+    private static func makeRequest(id: String, text: NotificationText, day: Date, time: TimeOfDay,
+                                    second: Int = 0, withSound: Bool = true,
+                                    now: Date) -> UNNotificationRequest? {
         var components = Calendar.current.dateComponents([.year, .month, .day], from: day)
         components.hour = time.hour
         components.minute = time.minute
+        components.second = second
 
         guard let fireDate = Calendar.current.date(from: components), fireDate > now else {
             return nil
         }
 
+        // Группа уведомлений: "morning", "evening", "homework"… Разные группы iOS
+        // не складывает в одну стопку, поэтому расписание и ДЗ видны по отдельности.
+        let thread = String(id.prefix(while: { $0 != "-" }))
+        let content = makeContent(text, thread: thread, withSound: withSound)
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
-        return UNNotificationRequest(identifier: id, content: makeContent(text), trigger: trigger)
+        return UNNotificationRequest(identifier: id, content: content, trigger: trigger)
     }
 
-    private static func makeContent(_ text: NotificationText) -> UNMutableNotificationContent {
+    private static func makeContent(_ text: NotificationText, thread: String,
+                                    withSound: Bool) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = text.title
         content.body = text.body
-        content.sound = .default
+        content.threadIdentifier = thread
+        if withSound {
+            content.sound = .default
+        }
         return content
     }
 }
